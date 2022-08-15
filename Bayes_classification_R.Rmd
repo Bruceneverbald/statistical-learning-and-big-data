@@ -1,0 +1,134 @@
+---
+title: "Bayes classification"
+author: "Bruce No.2119251"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r data, include=FALSE}
+library(mvtnorm)
+library(mcmcse)
+library(datasets)
+data(iris)
+index_versicolor = which(iris[,5]=='versicolor')
+index_virginica = which(iris[,5]=='virginica')
+index_setosa = which(iris[,5]=='setosa')
+iris[,5] = 1
+iris[index_virginica,5] = 2
+iris[index_setosa,5] = 3
+iris[,5] = factor(iris[,5])
+x <- iris[1:150, c("Sepal.Length", "Sepal.Width", "Species")]
+load("~/Desktop/420/420ASMT2/indices/index_iris_2119251.Rdata")
+number_train = 149
+x_train = as.matrix(x[index[1:number_train],1:2])
+y_train = x[index[1:number_train],3]
+x_test = as.matrix(x[index[number_train+1],1:2])
+y_test = x[index[number_train+1],3]
+```
+### Q1
+```{r evaluate log_likelihood, echo=TRUE}
+xtr = cbind(x_train,rep(1,149))
+
+log_likhd = function(x,y,Beta = rep(1,9)){
+  prob = matrix(0,nrow = nrow(x),ncol = 4)
+  Beta = matrix(Beta,ncol = 3)
+  prob[,c(1,2,3)] =exp(x %*% Beta)
+  for (i in c(1,2,3)) {
+    ind = which(as.numeric(y) == i)
+    prob[ind,4] = prob[ind,i]/rowSums(prob[ind,])
+  }
+  P = sum(log(prob[,4]))
+  return(P)
+}
+```
+The log liklihood is:
+```{r}
+print(log_likhd(xtr,y_train))
+```
+
+```{r include=FALSE}
+####   Metropolis Hasting Function 
+####   Generating MCMC
+SigMat = diag(9)
+MH = function(n=10000,x ,y ,Sigma = diag(9),miu = 0,b0=matrix(0,9,1)){
+  count  = 0
+  B = matrix(0,nrow = 9,ncol = n)
+  B[,1] = b0
+  U = runif(n)
+  for (i in 2:n){
+    Y = B[,i-1]+t(rmvnorm(n=1 ,mean = rep(0,9),sigma =Sigma))
+    post1 = log_likhd(x,y,Beta = B[,i-1])+log(dmvnorm(x = B[,i-1],mean = matrix(0,9,1),sigma = 100*diag(9)))
+    post2 = log_likhd(x,y,Beta = Y)+log(dmvnorm(x = t(Y) ,mean = matrix(0,9,1),sigma = 100*diag(9)))
+    alpha = post2-post1
+    if(log(U[i])<alpha){
+      B[,i] = Y
+      count = count + 1
+    }
+    else{
+      B[,i] = B[,i-1]
+    }
+  }
+  return(B)
+}
+
+```
+
+### Q 2&3
+
+```{r include=FALSE}
+B = MH(x = xtr,y = y_train,n = 200000,Sigma=0.01*diag(9))
+B_burn = B[,100001:200000]
+newsigma = (2.38^2)*cov(t(B_burn))/9
+B1 = MH(x = xtr,y = y_train,n = 200000,Sigma = newsigma)
+```
+
+
+
+```{r echo=FALSE,out.width=250}
+plot(seq(200000),B[8,],xlab = 'iterations',ylab = 'Beta',main = 'Before tuned')
+print('take first 100000 of iterations as burn_in progress')
+
+plot(seq(200000),B1[8,],xlab = 'iterations',ylab = 'Beta',main = 'After-tuned MCMC')
+burn_in = 100000
+print(paste('take 70000 iterations, get an ESS of',multiESS(t(B1[,burn_in :(burn_in +70000)]))))
+print('the diagonal of the proposal matrix is:')
+print(diag(newsigma))
+print(paste('the acceptance rate is:',1-mean(duplicated(B1[1,]))))
+
+```
+
+### Q4
+```{r out.width=280,figure.align = 'center'}
+hist(B[8,],xlab = 'second predator of Z3',main = 'histogram of beta')
+```
+
+
+### Q 5&6
+```{r out.width=280,figure.align = 'center'}
+log_prob = function(x,y,Beta = rep(1,9)){
+  prob = rep(0,3)
+  Beta = matrix(Beta,ncol = 3)
+  prob[c(1,2,3)] =exp(x%*%Beta)
+  P = log(prob[as.numeric(y)]/sum(prob))
+  return(P)
+}
+
+xte = cbind(x_test,rep(1,1))
+testlgprob = rep(0,ncol(B1))
+for (i in 1:ncol(B1)) {
+  testlgprob[i] = log_prob(xte,y = c(1),B1[,i])
+}
+hist(testlgprob,main = 'histogram of log probability')
+print(paste('expected probability of class 1 is',mean(exp(testlgprob))))
+```
